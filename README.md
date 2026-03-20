@@ -18,7 +18,7 @@ Add this package to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  stoplight_elements: ^0.0.1
+  stoplight_elements: ^0.0.3
 ```
 
 Then run:

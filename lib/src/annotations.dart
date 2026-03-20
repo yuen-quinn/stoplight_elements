@@ -120,6 +120,12 @@ class ApiProperty {
   final dynamic example;
   final List<String>? enumValues;
 
+  // 新增：支持嵌套属性（用于 object 类型的 properties）
+  final Map<String, ApiProperty>? properties;
+
+  // 新增：支持 $ref 引用（例如 '#/components/schemas/Foo'）
+  final String? ref;
+
   const ApiProperty({
     required this.type,
     this.description,
@@ -127,6 +133,8 @@ class ApiProperty {
     this.format,
     this.example,
     this.enumValues,
+    this.properties,
+    this.ref,
   });
 }
 

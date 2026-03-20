@@ -234,6 +234,36 @@ class OpenApiRegistry {
     return property;
   }
 
+  /// 将 `ApiProperty` 转成 OpenAPI Schema 对象。
+  ///
+  /// 支持：
+  /// - `properties` 嵌套（递归）
+  /// - `$ref` 引用
+  Map<String, dynamic> _buildPropertySchema(ApiProperty property) {
+    final schema = <String, dynamic>{};
+
+    schema['type'] = property.type;
+
+    if (property.description != null) schema['description'] = property.description;
+    if (property.format != null) schema['format'] = property.format;
+    if (property.enumValues != null) schema['enum'] = property.enumValues;
+    if (property.example != null) schema['example'] = property.example;
+
+    // 嵌套对象 properties
+    if (property.properties != null) {
+      final properties = <String, dynamic>{};
+      for (final entry in property.properties!.entries) {
+        properties[entry.key] = _buildPropertySchema(entry.value);
+      }
+      schema['properties'] = properties;
+    }
+
+    // 新增：支持 $ref 引用（例如 '#/components/schemas/Foo'）
+    if (property.ref != null) schema['\$ref'] = property.ref!;
+
+    return schema;
+  }
+
   
   /// 解析 schema 引用，支持泛型语法如 BaseResponse<HealthData>
   Map<String, dynamic> _parseSchemaRef(String schemaRef) {
@@ -254,19 +284,20 @@ class OpenApiRegistry {
           baseModel.properties!.forEach((key, value) {
             if (key == 'data') {
               // 将 data 字段替换为具体的泛型类型
-              properties[key] = {
-                'type': value.type,
-                if (value.description != null) 'description': value.description,
-                '\$ref': '#/components/schemas/$genericType',
-              };
+              properties[key] = _buildPropertySchema(
+                ApiProperty(
+                  type: value.type,
+                  description: value.description,
+                  required: value.required,
+                  format: value.format,
+                  example: value.example,
+                  enumValues: value.enumValues,
+                  properties: value.properties,
+                  ref: '#/components/schemas/$genericType',
+                ),
+              );
             } else {
-              properties[key] = {
-                'type': value.type,
-                if (value.description != null) 'description': value.description,
-                if (value.format != null) 'format': value.format,
-                if (value.enumValues != null) 'enum': value.enumValues,
-                if (value.example != null) 'example': value.example,
-              };
+              properties[key] = _buildPropertySchema(value);
             }
           });
         }
@@ -395,16 +426,7 @@ class OpenApiRegistry {
         if (model.properties != null)
           'properties': {
             for (final entry in model.properties!.entries)
-              entry.key: {
-                'type': entry.value.type,
-                if (entry.value.description != null)
-                  'description': entry.value.description,
-                if (entry.value.format != null) 'format': entry.value.format,
-                if (entry.value.enumValues != null)
-                  'enum': entry.value.enumValues,
-                if (entry.value.example != null)
-                  'example': entry.value.example,
-              },
+              entry.key: _buildPropertySchema(entry.value),
           },
         if (model.properties != null)
           'required': [

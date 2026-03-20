@@ -1,7 +1,8 @@
 name: stoplight_elements
 description: A Dart package for OpenAPI generation and Stoplight Elements page rendering.
 version: 0.0.1
-# repository: https://github.com/my_org/my_repo
+repository: https://github.com/yuen-quinn/stoplight_elements
+homepage: https://github.com/yuen-quinn/stoplight_elements
 
 environment:
   sdk: ^3.11.1

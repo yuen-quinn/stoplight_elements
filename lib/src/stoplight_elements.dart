@@ -73,10 +73,7 @@ String buildStoplightElementsHtml({
     </style>
 </head>
 <body>
-    <div class="custom-header">
-        <h1>🚀 Vania API Documentation</h1>
-        <p>现代化的API文档界面，支持实时测试和交互式探索</p>
-    </div>
+   
     <elements-api
         apiDescriptionUrl="$openapiUrl"
         ${apiDescriptionDocument.isNotEmpty ? 'apiDescriptionDocument="$apiDescriptionDocument"' : ''}

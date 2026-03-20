@@ -187,8 +187,23 @@ You can customize documentation metadata through `OpenApiConfig`:
 - `OpenApiConfig.version`
 - `OpenApiConfig.description`
 - `OpenApiConfig.serverUrl`
+- `OpenApiConfig.enableDebug`
+- `OpenApiConfig.defaultSchemes`
 
-Example:
+Recommended: use the single entry point `OpenApiConfig.configure(...)` (call before `autoScan` / `buildOpenApi`):
+
+```dart
+OpenApiConfig.configure(
+  title: 'Example API',
+  version: '1.0.0',
+  description: 'Example API documentation',
+  serverUrl: 'http://localhost:8000/api/v1/',
+  enableDebug: true,
+  defaultSchemes: ['http', 'https'],
+);
+```
+
+You can also assign fields directly:
 
 ```dart
 OpenApiConfig.title = 'Example API';

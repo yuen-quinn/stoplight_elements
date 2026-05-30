@@ -1,3 +1,7 @@
+## 0.0.6
+
+- Restructure documentation: English `README.md` (pub.dev default), Chinese `README_zh.md`.
+
 ## 0.0.5
 
 - Infer nested types from Dart fields: `@ApiModel` classes → `$ref`, inline objects, `List<T>`, `Map<K,V>`.

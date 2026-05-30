@@ -1,132 +1,132 @@
 # stoplight_elements
 
-[English](README_EN.md)
+[中文文档](README_zh.md)
 
-基于 Dart 注解的 OpenAPI 3.0.3 文档生成库，内置 [Stoplight Elements](https://github.com/stoplightio/elements) 交互式文档页面渲染。
+A Dart package for OpenAPI 3.0.3 generation with built-in [Stoplight Elements](https://github.com/stoplightio/elements) interactive documentation rendering.
 
-用 `@ApiPath`、`@ApiModel` 等注解描述接口与数据模型，运行时自动扫描并生成 OpenAPI JSON，再通过 `buildStoplightElementsHtml()` 输出可浏览的 API 文档页。
+Describe endpoints and data models with annotations such as `@ApiPath` and `@ApiModel`, auto-scan them at runtime to produce OpenAPI JSON, and serve a browsable docs page via `buildStoplightElementsHtml()`.
 
-## 特性
+## Features
 
-- 注解驱动：路径、参数、请求体、响应、标签、安全方案均可声明
-- 运行时自动扫描：`OpenApiRegistry.instance.autoScan()` 基于 `dart:mirrors` 发现注解
-- OpenAPI 3.0.3 规范输出：`buildOpenApi()` 生成完整 spec
-- 类型推断：字段上的 `@ApiProperty` 可省略 `type`，由 Dart 类型自动推断
-- 嵌套类型：`User`、`List<User>`、`Map<String, User>` 等自动映射为 `$ref` / `array` / `additionalProperties`
-- 泛型响应：支持 `BaseResponse<HealthData>` 语法展开 schema
-- Stoplight Elements HTML：一行代码生成文档页
+- Annotation-driven: paths, parameters, request bodies, responses, tags, and security schemes
+- Runtime auto-scan: `OpenApiRegistry.instance.autoScan()` discovers annotations via `dart:mirrors`
+- OpenAPI 3.0.3 output: `buildOpenApi()` generates a complete spec
+- Type inference: omit `type` on field-level `@ApiProperty`; Dart types are inferred automatically
+- Nested types: `User`, `List<User>`, `Map<String, User>`, etc. map to `$ref` / `array` / `additionalProperties`
+- Generic responses: `BaseResponse<HealthData>` syntax expands schemas
+- Stoplight Elements HTML: generate a docs page in one call
 
-## 环境要求
+## Requirements
 
 - Dart SDK `^3.11.1`
-- 运行环境需支持 `dart:mirrors`（**不支持** Flutter Web、AOT 编译后的独立二进制等无反射场景）
+- A runtime that supports `dart:mirrors` (**not** Flutter Web, AOT-compiled standalone binaries, or other reflection-less environments)
 
-## 安装
+## Installation
 
-在 `pubspec.yaml` 中添加依赖：
+Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  stoplight_elements: ^0.0.5
+  stoplight_elements: ^0.0.6
 ```
 
-然后执行：
+Then run:
 
 ```bash
 dart pub get
 ```
 
-## 导入
+## Import
 
 ```dart
 import 'package:stoplight_elements/stoplight_elements.dart';
 ```
 
-该入口会导出以下模块：
+The library entry point exports:
 
-| 模块 | 内容 |
-|------|------|
-| `annotations.dart` | 全部注解类 |
+| Module | Contents |
+|--------|----------|
+| `annotations.dart` | All annotation classes |
 | `generator.dart` | `OpenApiRegistry` |
 | `config.dart` | `OpenApiConfig` |
 | `stoplight_elements.dart` | `buildStoplightElementsHtml()` |
 
 ---
 
-## 快速开始
+## Quick Start
 
-### 1. 配置文档元信息
+### 1. Configure documentation metadata
 
-在应用启动时（`autoScan` / `buildOpenApi` 之前）调用：
+Call this at application startup (before `autoScan` / `buildOpenApi`):
 
 ```dart
 OpenApiConfig.configure(
   title: 'My API',
   version: '1.0.0',
-  description: 'API 文档',
+  description: 'API documentation',
   serverUrl: 'http://localhost:8000/api/v1/',
   enableDebug: true,
   defaultSchemes: ['http', 'https'],
 );
 ```
 
-也可直接赋值：
+Or assign fields directly:
 
 ```dart
 OpenApiConfig.title = 'My API';
 OpenApiConfig.serverUrl = 'http://localhost:8000/';
 ```
 
-### 2. 定义数据模型
+### 2. Define data models
 
-**方式 A：字段级 `@ApiProperty`（推荐）**
+**Option A: Field-level `@ApiProperty` (recommended)**
 
-类型可省略，由 Dart 字段类型自动推断：
+Types can be omitted; they are inferred from Dart field types:
 
 ```dart
-@ApiModel(description: '健康检查响应')
+@ApiModel(description: 'Health check response')
 class HealthData {
-  @ApiProperty(description: '服务状态', example: 'ok')
+  @ApiProperty(description: 'Service status', example: 'ok')
   final String status;
 
-  @ApiProperty(description: '时间戳', example: '2023-01-01T00:00:00.000Z')
+  @ApiProperty(description: 'Timestamp', example: '2023-01-01T00:00:00.000Z')
   final String timestamp;
 
   HealthData({required this.status, required this.timestamp});
 }
 ```
 
-**方式 B：类级 `properties` 映射**
+**Option B: Class-level `properties` map**
 
 ```dart
 @ApiModel(
-  description: '通用响应包装',
+  description: 'Generic response wrapper',
   properties: {
-    'code': ApiProperty(type: 'integer', description: '业务码', example: 0),
-    'message': ApiProperty(type: 'string', description: '提示信息'),
-    'data': ApiProperty(type: 'object', description: '业务数据'),
+    'code': ApiProperty(type: 'integer', description: 'Business code', example: 0),
+    'message': ApiProperty(type: 'string', description: 'Message'),
+    'data': ApiProperty(type: 'object', description: 'Payload'),
   },
 )
 class BaseResponse {}
 ```
 
-> 字段级注解与类级 `properties` 会合并，**字段级优先**；未声明的字段仍按 Dart 类型推断。
+> Field-level annotations merge with class-level `properties`; **field-level wins**. Undeclared fields are still inferred from Dart types.
 
-### 3. 定义接口
+### 3. Define endpoints
 
 ```dart
-@ApiTag(name: 'Health', description: '健康检查')
+@ApiTag(name: 'Health', description: 'Health checks')
 class HealthController {
   @ApiPath(
     path: '/health',
     method: 'GET',
     tags: ['Health'],
-    summary: '健康检查',
-    description: '检查服务是否正常运行',
+    summary: 'Health check',
+    description: 'Check whether the service is running',
     responses: {
       200: ApiResponse(
         code: 200,
-        description: '服务正常',
+        description: 'Service is healthy',
         schema: 'BaseResponse<HealthData>',
       ),
     },
@@ -137,40 +137,40 @@ class HealthController {
 }
 ```
 
-Controller 需具备**无参默认构造函数**，否则 `autoScan` 无法实例化并扫描方法注解。
+Controllers must have a **parameterless default constructor**, otherwise `autoScan` cannot instantiate them to scan method annotations.
 
-### 4. 注册并扫描
+### 4. Register and scan
 
 ```dart
-// 可选：注册 JWT Bearer 等安全方案
+// Optional: register JWT Bearer or other security schemes
 OpenApiRegistry.instance.registerSecurityScheme(
   'authorization',
   ApiSecurityScheme(
     type: 'http',
     scheme: 'bearer',
     bearerFormat: 'JWT',
-    description: 'JWT Bearer 认证',
+    description: 'JWT Bearer authentication',
   ),
 );
 
-// 自动扫描（建议用 libraryFilter 限定范围）
+// Auto-scan (use libraryFilter to limit scope)
 OpenApiRegistry.instance.autoScan(
   libraryFilter: (uri) => uri.toString().startsWith('package:my_app/'),
 );
 ```
 
-`autoScan` 在同一 Isolate 内**只执行一次**（内部有 `_isScanned` 标志）。
+`autoScan` runs **only once** per Isolate (guarded by an internal `_isScanned` flag).
 
-### 5. 暴露端点
+### 5. Expose endpoints
 
-推荐提供两个 HTTP 路由：
+Recommended HTTP routes:
 
-| 路由 | 作用 |
-|------|------|
-| `GET /openapi.json` | 返回 OpenAPI JSON |
-| `GET /docs` | 返回 Stoplight Elements 文档页 |
+| Route | Purpose |
+|-------|---------|
+| `GET /openapi.json` | Returns OpenAPI JSON |
+| `GET /docs` | Returns the Stoplight Elements docs page |
 
-**Vania 框架示例：**
+**Vania framework example:**
 
 ```dart
 import 'package:vania/http/controller.dart';
@@ -201,11 +201,12 @@ class OpenApiController extends Controller {
 }
 ```
 
-**纯 Dart `shelf` 示例：**
+**Plain Dart `shelf` example:**
 
 ```dart
+import 'dart:convert';
+
 import 'package:shelf/shelf.dart';
-import 'package:shelf/shelf_io.dart' as io;
 import 'package:stoplight_elements/stoplight_elements.dart';
 
 Handler createHandler() {
@@ -227,108 +228,108 @@ Handler createHandler() {
 }
 ```
 
-启动后访问 `/docs` 即可查看交互式文档。
+Visit `/docs` after startup to view the interactive documentation.
 
 ---
 
-## 注解参考
+## Annotation Reference
 
-### `@ApiPath` — 接口路径
+### `@ApiPath` — Endpoint path
 
 ```dart
 @ApiPath(
-  path: '/users/{id}',           // 必填：路径
-  method: 'GET',                 // 必填：HTTP 方法（GET/POST/PUT/DELETE/PATCH 等）
-  summary: '获取用户',            // 必填：摘要
-  description: '按 ID 查询用户',   // 可选：详细描述
-  tags: ['Users'],               // 可选：分组标签
-  deprecated: false,             // 可选：是否废弃
-  parameters: [...],             // 可选：路径/查询/Header 参数
-  requestBody: ApiRequestBody(...), // 可选：请求体
-  responses: {200: ApiResponse(...)}, // 可选：响应
-  security: ['authorization'],   // 可选：引用的 securitySchemes 名称
+  path: '/users/{id}',              // required: path
+  method: 'GET',                    // required: HTTP method
+  summary: 'Get user',              // required: summary
+  description: 'Fetch user by ID', // optional: description
+  tags: ['Users'],                  // optional: tag groups
+  deprecated: false,                // optional: deprecated flag
+  parameters: [...],                // optional: path/query/header params
+  requestBody: ApiRequestBody(...), // optional: request body
+  responses: {200: ApiResponse(...)}, // optional: responses
+  security: ['authorization'],      // optional: securitySchemes names
 )
 ```
 
-### `@ApiParameter` — 请求参数
+### `@ApiParameter` — Request parameter
 
 ```dart
 const ApiParameter(
   name: 'id',
   location: 'path',       // path | query | header | cookie
-  description: '用户 ID',
+  description: 'User ID',
   required: true,
-  type: 'string',         // OpenAPI 类型：string | integer | number | boolean
-  format: 'uuid',           // 可选：如 uuid、int64、date-time
+  type: 'string',         // OpenAPI type: string | integer | number | boolean
+  format: 'uuid',         // optional: uuid, int64, date-time, etc.
   example: '550e8400-e29b-41d4-a716-446655440000',
 )
 ```
 
-### `@ApiRequestBody` — 请求体
+### `@ApiRequestBody` — Request body
 
 ```dart
 const ApiRequestBody(
-  description: '创建用户请求',
+  description: 'Create user request',
   required: true,
-  schema: 'CreateUserRequest',  // 模型名或泛型如 BaseResponse<User>
+  schema: 'CreateUserRequest',  // model name or generic, e.g. BaseResponse<User>
   example: {'name': 'Alice'},
 )
 ```
 
-### `@ApiResponse` — 响应
+### `@ApiResponse` — Response
 
 ```dart
 const ApiResponse(
   code: 200,
-  description: '成功',
-  schema: 'User',                    // 模型名
-  // schema: 'BaseResponse<User>',   // 泛型展开
+  description: 'Success',
+  schema: 'User',                    // model name
+  // schema: 'BaseResponse<User>',   // generic expansion
   example: {'id': '1', 'name': 'Alice'},
 )
 ```
 
-### `@ApiTag` — 标签分组
+### `@ApiTag` — Tag grouping
 
-加在 Controller 类上，用于 OpenAPI `tags` 区块：
+Apply on a Controller class for the OpenAPI `tags` section:
 
 ```dart
-@ApiTag(name: 'Users', description: '用户相关接口')
+@ApiTag(name: 'Users', description: 'User-related endpoints')
 class UserController { ... }
 ```
 
-若 `@ApiPath` 未指定 `tags`，扫描时会尝试使用类上 `@ApiTag` 的名称作为默认标签。
+If `@ApiPath` omits `tags`, the scanner uses the class-level `@ApiTag` name as the default.
 
-### `@ApiModel` — 数据模型
+### `@ApiModel` — Data model
 
 ```dart
 @ApiModel(
-  description: '用户',
-  properties: { ... },  // 可选，与字段注解合并
+  description: 'User',
+  properties: { ... },  // optional, merged with field annotations
 )
 class User { ... }
 ```
 
-### `@ApiProperty` — 模型字段
+### `@ApiProperty` — Model field
 
 ```dart
 @ApiProperty(
-  type: 'string',              // 可选，省略则推断
-  description: '用户名',
-  required: true,              // 可选，省略则按 Dart 可空性推断
+  type: 'string',              // optional, inferred if omitted
+  description: 'Username',
+  required: true,              // optional, inferred from nullability
   format: 'email',
   example: 'alice@example.com',
-  enumValues: ['a', 'b'],      // 枚举值
-  ref: '#/components/schemas/User',  // 完整 $ref
-  schema: 'User',              // 简写：自动转为 #/components/schemas/User
-  items: ApiProperty(...),     // array 元素 schema
-  additionalProperties: ApiProperty(...), // Map 值类型 schema
-  properties: { ... },         // 内联 object 子字段
+  enumValues: ['a', 'b'],      // enum values
+  ref: '#/components/schemas/User',  // full $ref
+  schema: 'User',              // shorthand → #/components/schemas/User
+  items: ApiProperty(...),     // array item schema
+  additionalProperties: ApiProperty(...), // Map value schema
+  properties: { ... },         // inline object sub-fields
 )
 ```
 
-### `@ApiSecurityScheme` — 安全方案
+### `@ApiSecurityScheme` — Security scheme
 
-通过 `registerSecurityScheme` 注册，不直接用作类注解：
+Register via `registerSecurityScheme`, not as a class annotation:
 
 ```dart
 // HTTP Bearer (JWT)
@@ -336,7 +337,7 @@ ApiSecurityScheme(
   type: 'http',
   scheme: 'bearer',
   bearerFormat: 'JWT',
-  description: 'JWT 认证',
+  description: 'JWT authentication',
 )
 
 // API Key
@@ -345,17 +346,17 @@ ApiSecurityScheme(
   scheme: 'apiKey',
   name: 'X-API-Key',
   in_: 'header',
-  description: 'API Key 认证',
+  description: 'API Key authentication',
 )
 ```
 
-在 `@ApiPath` 中引用：
+Reference in `@ApiPath`:
 
 ```dart
 @ApiPath(
   path: '/profile',
   method: 'GET',
-  summary: '个人资料',
+  summary: 'Profile',
   security: ['authorization'],
   responses: { ... },
 )
@@ -363,43 +364,43 @@ ApiSecurityScheme(
 
 ---
 
-## 类型推断规则
+## Type Inference Rules
 
-扫描模型字段时，按以下规则生成 OpenAPI schema：
+When scanning model fields, schemas are generated as follows:
 
-| Dart 类型 | OpenAPI 输出 |
-|-----------|-------------|
+| Dart type | OpenAPI output |
+|-----------|----------------|
 | `String` | `{ "type": "string" }` |
 | `int` | `{ "type": "integer", "format": "int64" }` |
 | `double` | `{ "type": "number", "format": "double" }` |
 | `bool` | `{ "type": "boolean" }` |
 | `DateTime` | `{ "type": "string", "format": "date-time" }` |
-| `Enum` 子类 | `{ "type": "string" }` |
-| 带 `@ApiModel` 的类 `User` | `{ "$ref": "#/components/schemas/User" }` |
-| 无 `@ApiModel` 的普通类 | 内联 `{ "type": "object", "properties": {...} }` |
+| `Enum` subclass | `{ "type": "string" }` |
+| `@ApiModel` class `User` | `{ "$ref": "#/components/schemas/User" }` |
+| Plain class without `@ApiModel` | inline `{ "type": "object", "properties": {...} }` |
 | `List<User>` | `{ "type": "array", "items": { "$ref": "..." } }` |
 | `Map<String, User>` | `{ "type": "object", "additionalProperties": { "$ref": "..." } }` |
-| `User?`（可空） | 同上，但 `required: false` |
+| `User?` (nullable) | same as above, but `required: false` |
 | `dynamic` + `@ApiProperty(schema: 'User')` | `{ "$ref": "#/components/schemas/User" }` |
 
-**嵌套示例：**
+**Nested example:**
 
 ```dart
-@ApiModel(description: '用户')
+@ApiModel(description: 'User')
 class UserDto {
   @ApiProperty(description: 'ID', required: true)
   final String id;
   UserDto({required this.id});
 }
 
-@ApiModel(description: '分页结果')
+@ApiModel(description: 'Paged result')
 class UserPage {
   final List<UserDto> items;   // → array + items.$ref
-  final UserDto? current;        // → $ref, required: false
+  final UserDto? current;      // → $ref, required: false
   UserPage({required this.items, this.current});
 }
 
-@ApiModel(description: '索引表')
+@ApiModel(description: 'Index map')
 class UserMap {
   final Map<String, UserDto> byId;  // → additionalProperties.$ref
   UserMap({required this.byId});
@@ -408,9 +409,9 @@ class UserMap {
 
 ---
 
-## 泛型响应
+## Generic Responses
 
-响应 schema 支持 `BaseSchema<ConcreteType>` 语法。生成器会将基础模型中名为 `data` 的字段替换为具体类型的 `$ref`：
+Response schemas support `BaseSchema<ConcreteType>` syntax. The generator replaces the `data` field in the base model with a `$ref` to the concrete type:
 
 ```dart
 @ApiModel(
@@ -422,40 +423,40 @@ class UserMap {
 )
 class BaseResponse {}
 
-// 在 @ApiPath 的 responses 中使用：
+// Use in @ApiPath responses:
 schema: 'BaseResponse<HealthData>'
 ```
 
-等价于展开 `BaseResponse`，并将其 `data` 字段指向 `#/components/schemas/HealthData`。
+This expands `BaseResponse` and points its `data` field to `#/components/schemas/HealthData`.
 
 ---
 
 ## OpenApiRegistry API
 
-`OpenApiRegistry` 为单例，通过 `OpenApiRegistry.instance` 访问。
+`OpenApiRegistry` is a singleton accessed via `OpenApiRegistry.instance`.
 
-| 方法 | 说明 |
-|------|------|
-| `autoScan({libraryFilter})` | 扫描当前 Isolate 所有库的注解；`libraryFilter` 按 URI 过滤 |
-| `scanController(Object controller)` | 手动扫描单个 Controller 实例 |
-| `scanModel(Type type, {String? name})` | 手动扫描单个模型类 |
-| `scanModelByName(String name, ClassMirror mirror)` | 内部使用，按类名扫描 |
-| `registerPath(ApiPath path)` | 手动注册路径 |
-| `registerModel(String name, ApiModel model)` | 手动注册 schema |
-| `registerSecurityScheme(String name, ApiSecurityScheme scheme)` | 注册安全方案 |
-| `registerTag(ApiTag tag)` | 注册标签 |
-| `buildOpenApi()` | 生成完整 OpenAPI 3.0.3 JSON |
-| `resetForTesting()` | 清空注册表（测试用） |
+| Method | Description |
+|--------|-------------|
+| `autoScan({libraryFilter})` | Scan annotations in all libraries of the current Isolate; filter by URI |
+| `scanController(Object controller)` | Manually scan a single Controller instance |
+| `scanModel(Type type, {String? name})` | Manually scan a single model class |
+| `scanModelByName(String name, ClassMirror mirror)` | Internal: scan by class name |
+| `registerPath(ApiPath path)` | Manually register a path |
+| `registerModel(String name, ApiModel model)` | Manually register a schema |
+| `registerSecurityScheme(String name, ApiSecurityScheme scheme)` | Register a security scheme |
+| `registerTag(ApiTag tag)` | Register a tag |
+| `buildOpenApi()` | Generate the full OpenAPI 3.0.3 JSON |
+| `resetForTesting()` | Clear the registry (for tests) |
 
-### libraryFilter 示例
+### libraryFilter examples
 
 ```dart
-// 只扫描自己的应用包
+// Scan only your application package
 OpenApiRegistry.instance.autoScan(
   libraryFilter: (uri) => uri.toString().startsWith('package:my_app/'),
 );
 
-// 只扫描测试文件
+// Scan only a test file
 OpenApiRegistry.instance.autoScan(
   libraryFilter: (uri) => uri.toString().contains('my_test.dart'),
 );
@@ -463,51 +464,51 @@ OpenApiRegistry.instance.autoScan(
 
 ---
 
-## buildStoplightElementsHtml 参数
+## buildStoplightElementsHtml Parameters
 
-生成嵌入 Stoplight Elements Web Components 的完整 HTML 页面：
+Generates a full HTML page embedding Stoplight Elements Web Components:
 
 ```dart
 final html = buildStoplightElementsHtml(
-  openapiUrl: '/openapi.json',        // 必填：OpenAPI JSON 地址
-  title: 'API Documentation',          // 页面标题
+  openapiUrl: '/openapi.json',        // required: OpenAPI JSON URL
+  title: 'API Documentation',       // page title
   stoplightElementsJsUrl: 'https://unpkg.com/@stoplight/elements/web-components.min.js',
   stoplightElementsCssUrl: 'https://unpkg.com/@stoplight/elements/styles.min.css',
   stoplightElementsFaviconUrl: 'https://fastapi.tiangolo.com/img/favicon.png',
-  apiDescriptionDocument: '',          // 内联 OpenAPI 文档（与 URL 二选一）
-  basePath: '',                        // API 基础路径
-  hideInternal: false,                 // 隐藏 x-internal 标记的接口
-  hideTryIt: false,                    // 隐藏 Try It 调试面板
-  tryItCorsProxy: '',                  // CORS 代理地址
+  apiDescriptionDocument: '',         // inline OpenAPI doc (alternative to URL)
+  basePath: '',                       // API base path
+  hideInternal: false,                // hide x-internal operations
+  hideTryIt: false,                   // hide Try It panel
+  tryItCorsProxy: '',                 // CORS proxy URL
   tryItCredentialPolicy: StoplightTryItCredentialPolicyOptions.omit,
   layout: StoplightLayoutOptions.sidebar,  // sidebar | stacked
-  logo: '',                            // Logo URL
+  logo: '',                           // logo URL
   router: StoplightRouterOptions.history,  // history | hash | memory | static
 );
 ```
 
-### 布局与路由常量
+### Layout and router constants
 
 ```dart
-// 布局
-StoplightLayoutOptions.sidebar   // 侧边栏（默认）
-StoplightLayoutOptions.stacked   // 堆叠
+// Layout
+StoplightLayoutOptions.sidebar   // sidebar (default)
+StoplightLayoutOptions.stacked   // stacked
 
-// 路由模式
-StoplightRouterOptions.history   // History API（默认）
-StoplightRouterOptions.hash      // Hash 路由
-StoplightRouterOptions.memory    // Memory 路由
-StoplightRouterOptions.static_   // 静态路由
+// Router mode
+StoplightRouterOptions.history   // History API (default)
+StoplightRouterOptions.hash      // hash routing
+StoplightRouterOptions.memory    // memory routing
+StoplightRouterOptions.static_   // static routing
 
-// Try It 凭证策略
+// Try It credential policy
 StoplightTryItCredentialPolicyOptions.omit
 StoplightTryItCredentialPolicyOptions.include
 StoplightTryItCredentialPolicyOptions.sameOrigin
 ```
 
-### 跨域 Try It
+### Cross-origin Try It
 
-若 API 与文档页不同源，可配置 CORS 代理：
+If the API and docs page are on different origins, configure a CORS proxy:
 
 ```dart
 buildStoplightElementsHtml(
@@ -518,16 +519,16 @@ buildStoplightElementsHtml(
 
 ---
 
-## 完整集成示例（Vania）
+## Full Integration Example (Vania)
 
 ```dart
 // ── models/health.dart ──
-@ApiModel(description: '健康检查数据')
+@ApiModel(description: 'Health check data')
 class HealthData {
-  @ApiProperty(description: '状态', example: 'ok')
+  @ApiProperty(description: 'Status', example: 'ok')
   final String status;
 
-  @ApiProperty(description: '服务名', example: 'my_api')
+  @ApiProperty(description: 'Service name', example: 'my_api')
   final String service;
 
   HealthData({required this.status, required this.service});
@@ -536,17 +537,17 @@ class HealthData {
 }
 
 // ── controllers/health_controller.dart ──
-@ApiTag(name: 'Health', description: '健康检查')
+@ApiTag(name: 'Health', description: 'Health checks')
 class HealthController extends Controller {
   @ApiPath(
     path: '/health',
     method: 'GET',
     tags: ['Health'],
-    summary: '健康检查',
+    summary: 'Health check',
     responses: {
       200: ApiResponse(
         code: 200,
-        description: '正常',
+        description: 'OK',
         schema: 'HealthData',
       ),
     },
@@ -582,53 +583,53 @@ class RouteServiceProvider extends ServiceProvider {
       libraryFilter: (uri) => uri.toString().startsWith('package:my_app/'),
     );
 
-    // 注册业务路由与 OpenAPI 路由...
+    // Register business routes and OpenAPI routes...
   }
 }
 ```
 
 ---
 
-## 注意事项
+## Notes
 
-1. **`dart:mirrors` 限制**  
-   本库依赖运行时反射。Flutter Web、Dart 编译为原生可执行文件（AOT）等环境无法使用。适用于 Dart 服务端（VM 模式）。
+1. **`dart:mirrors` limitation**  
+   This package relies on runtime reflection. It does not work on Flutter Web, AOT-compiled native binaries, or similar environments. Use it on the Dart VM (server-side).
 
-2. **`autoScan` 只执行一次**  
-   同一 Isolate 内重复调用会被忽略。测试时可调用 `resetForTesting()` 重置。
+2. **`autoScan` runs once**  
+   Repeated calls in the same Isolate are ignored. Call `resetForTesting()` in tests to reset.
 
-3. **Controller 需要无参构造函数**  
-   扫描时会 `newInstance` 实例化 Controller。若只有命名构造函数，该方法会被跳过。
+3. **Controllers need a parameterless constructor**  
+   Scanning instantiates controllers via `newInstance`. Named-only constructors are skipped.
 
-4. **使用 `libraryFilter` 提升性能**  
-   不加过滤会遍历所有已加载库，生产环境务必限定为应用包路径。
+4. **Use `libraryFilter` for performance**  
+   Without a filter, all loaded libraries are scanned. In production, limit to your application package path.
 
-5. **schema 命名**  
-   模型 schema 名称默认取 Dart 类名（如 `HealthData` → `#/components/schemas/HealthData`）。
+5. **Schema naming**  
+   Schema names default to the Dart class name (e.g. `HealthData` → `#/components/schemas/HealthData`).
 
-6. **OpenAPI 版本**  
-   固定输出 `openapi: 3.0.3`。
+6. **OpenAPI version**  
+   Output is fixed at `openapi: 3.0.3`.
 
 ---
 
-## 开发与测试
+## Development and Testing
 
 ```bash
-# 运行测试
+# Run tests
 dart test
 
-# 分析代码
+# Analyze code
 dart analyze
 ```
 
-测试中使用 `resetForTesting()` + 带 `libraryFilter` 的 `autoScan` 隔离扫描范围，参见 `test/nested_schema_test.dart`。
+Tests use `resetForTesting()` plus `autoScan` with `libraryFilter` to isolate scan scope. See `test/nested_schema_test.dart`.
 
 ---
 
-## 更新日志
+## Changelog
 
-详见 [CHANGELOG.md](CHANGELOG.md)。
+See [CHANGELOG.md](CHANGELOG.md).
 
-## 许可证
+## License
 
-MIT — 详见 [LICENSE](LICENSE)。
+MIT — see [LICENSE](LICENSE).

@@ -113,28 +113,42 @@ class ApiModel {
 
 /// API属性注解
 class ApiProperty {
-  final String type;
+  final String? type;
   final String? description;
-  final bool required;
+
+  /// `null` 表示未指定，合并时由推断结果补全。
+  final bool? required;
   final String? format;
   final dynamic example;
   final List<String>? enumValues;
 
-  // 新增：支持嵌套属性（用于 object 类型的 properties）
+  /// 内联 object 的子字段（无 [@ApiModel] 时展开为嵌套 schema）
   final Map<String, ApiProperty>? properties;
 
-  // 新增：支持 $ref 引用（例如 '#/components/schemas/Foo'）
+  /// 完整 `$ref`，如 `#/components/schemas/User`
   final String? ref;
 
+  /// 模型名简写，如 `User` → `#/components/schemas/User`
+  final String? schema;
+
+  /// `type: array` 时的元素 schema
+  final ApiProperty? items;
+
+  /// `Map` 值类型 schema（输出为 `additionalProperties`）
+  final ApiProperty? additionalProperties;
+
   const ApiProperty({
-    required this.type,
+    this.type,
     this.description,
-    this.required = false,
+    this.required,
     this.format,
     this.example,
     this.enumValues,
     this.properties,
     this.ref,
+    this.schema,
+    this.items,
+    this.additionalProperties,
   });
 }
 

@@ -13,8 +13,7 @@ class OpenApiRegistry {
   final Map<String, ApiSecurityScheme> _securitySchemes = {};
   final Map<String, ApiTag> _tags = {};
 
-  // 缓存机制
-  static final Map<Type, ApiProperty> _typePropertyCache = {};
+  static final Map<Type, ApiProperty> _primitiveTypeCache = {};
   static bool _isScanned = false;
   
   // 预编译正则表达式
@@ -39,6 +38,19 @@ class OpenApiRegistry {
 
   void registerTag(ApiTag tag) {
     _tags[tag.name] = tag;
+  }
+
+  /// Clears registry state (for tests).
+  void resetForTesting() {
+    _paths.clear();
+    _schemas.clear();
+    _securitySchemes.clear();
+    _tags.clear();
+    _isScanned = false;
+  }
+
+  bool _isNullableMirror(TypeMirror mirror) {
+    return mirror.toString().endsWith('?');
   }
 
   /// 自动扫描当前 Isolate 里所有带 OpenAPI 注解的类和方法
@@ -123,30 +135,129 @@ class OpenApiRegistry {
     return apiModelMeta;
   }
 
-  /// 处理模型属性的通用方法
-  Map<String, ApiProperty> _processModelProperties(ClassMirror classMirror, ApiModel apiModelMeta) {
-    // 先以注解中的 properties 为主
+  /// 处理模型属性的通用方法。
+  ///
+  /// 合并顺序（后者覆盖前者）：
+  /// 1. 类上 [@ApiModel] 的 `properties`
+  /// 2. 字段上的 [@ApiProperty]（未写 `type` 时按 Dart 类型推断）
+  /// 3. 仍未声明的字段按 Dart 类型推断
+  Map<String, ApiProperty> _processModelProperties(
+    ClassMirror classMirror,
+    ApiModel apiModelMeta,
+  ) {
     final props = <String, ApiProperty>{};
     if (apiModelMeta.properties != null) {
       props.addAll(apiModelMeta.properties!);
     }
 
-    // 如果注解里没写 properties，尝试根据字段自动推断
-    if (props.isEmpty) {
-      for (final entry in classMirror.declarations.entries) {
-        final decl = entry.value;
-        if (decl is VariableMirror && !decl.isStatic) {
-          final fieldName = MirrorSystem.getName(entry.key);
-          if (props.containsKey(fieldName)) continue;
+    for (final entry in classMirror.declarations.entries) {
+      final decl = entry.value;
+      if (decl is! VariableMirror || decl.isStatic) {
+        continue;
+      }
 
-          final typeMirror = decl.type;
-          final property = _inferPropertyFromType(fieldName, typeMirror);
-          props[fieldName] = property;
-        }
+      final fieldName = MirrorSystem.getName(entry.key);
+      final inferred = _inferPropertyFromType(fieldName, decl.type);
+      final annotated = _apiPropertyFromField(decl);
+
+      if (annotated != null) {
+        props[fieldName] = _mergeApiProperty(annotated, inferred);
+      } else if (!props.containsKey(fieldName)) {
+        props[fieldName] = inferred;
       }
     }
 
     return props;
+  }
+
+  ApiProperty? _apiPropertyFromField(VariableMirror decl) {
+    for (final meta in decl.metadata) {
+      final obj = meta.reflectee;
+      if (obj is ApiProperty) {
+        return obj;
+      }
+    }
+    return null;
+  }
+
+  /// 字段 [@ApiProperty] 优先；未填写的 `type` / `format` 等从推断结果补全。
+  ApiProperty _mergeApiProperty(ApiProperty annotated, ApiProperty inferred) {
+    return ApiProperty(
+      type: annotated.type ?? inferred.type,
+      description: annotated.description ?? inferred.description,
+      required: annotated.required ?? inferred.required,
+      format: annotated.format ?? inferred.format,
+      example: annotated.example ?? inferred.example,
+      enumValues: annotated.enumValues ?? inferred.enumValues,
+      properties: annotated.properties ?? inferred.properties,
+      ref: _resolveRef(annotated) ?? _resolveRef(inferred),
+      schema: annotated.schema ?? inferred.schema,
+      items: annotated.items ?? inferred.items,
+      additionalProperties:
+          annotated.additionalProperties ?? inferred.additionalProperties,
+    );
+  }
+
+  String? _resolveRef(ApiProperty property) {
+    if (property.ref != null) {
+      return property.ref;
+    }
+    if (property.schema != null) {
+      return _schemaToRef(property.schema!);
+    }
+    return null;
+  }
+
+  String _schemaToRef(String schema) {
+    if (schema.startsWith('#/')) {
+      return schema;
+    }
+    return '#/components/schemas/$schema';
+  }
+
+  TypeMirror _coreTypeMirror(TypeMirror mirror) {
+    if (!_isNullableMirror(mirror)) {
+      return mirror;
+    }
+    final type = mirror.reflectedType;
+    if (type == null) {
+      return mirror;
+    }
+    return reflectType(type);
+  }
+
+  bool _isListType(TypeMirror mirror) {
+    final core = _coreTypeMirror(mirror);
+    final t = core.reflectedType;
+    if (t == null || t == dynamic) {
+      return false;
+    }
+    return t == List || MirrorSystem.getName(core.simpleName) == 'List';
+  }
+
+  bool _isMapType(TypeMirror mirror) {
+    final core = _coreTypeMirror(mirror);
+    final t = core.reflectedType;
+    if (t == null || t == dynamic) {
+      return false;
+    }
+    return t == Map || MirrorSystem.getName(core.simpleName) == 'Map';
+  }
+
+  bool _isEnumType(TypeMirror mirror) {
+    final core = _coreTypeMirror(mirror);
+    if (core is! ClassMirror) {
+      return false;
+    }
+    return core.isSubtypeOf(reflectType(Enum));
+  }
+
+  void _ensureModelRegistered(ClassMirror classMirror) {
+    final name = MirrorSystem.getName(classMirror.simpleName);
+    if (_schemas.containsKey(name)) {
+      return;
+    }
+    scanModelByName(name, classMirror);
   }
 
   /// 扫描带有 @ApiModel 注解的模型类，通过类名构建 schema
@@ -190,76 +301,186 @@ class OpenApiRegistry {
   }
 
   ApiProperty _inferPropertyFromType(String fieldName, TypeMirror typeMirror) {
-    final t = typeMirror.reflectedType;
-    
-    // 使用缓存避免重复计算
-    if (_typePropertyCache.containsKey(t)) {
-      return _typePropertyCache[t]!;
+    _initPrimitiveCache();
+
+    final required = !_isNullableMirror(typeMirror);
+    final core = _coreTypeMirror(typeMirror);
+    final t = core.reflectedType;
+
+    if (t != null && _primitiveTypeCache.containsKey(t)) {
+      final cached = _primitiveTypeCache[t]!;
+      return ApiProperty(
+        type: cached.type,
+        format: cached.format,
+        required: required,
+      );
     }
 
-    ApiProperty property;
-    if (t == int) {
-      property = ApiProperty(
-        type: 'integer',
-        format: 'int64',
-        required: false,
-      );
-    } else if (t == double) {
-      property = ApiProperty(
-        type: 'number',
-        format: 'double',
-        required: false,
-      );
-    } else if (t == bool) {
-      property = ApiProperty(
-        type: 'boolean',
-        required: false,
-      );
-    } else if (t == DateTime) {
-      property = ApiProperty(
-        type: 'string',
-        format: 'date-time',
-        required: false,
-      );
-    } else {
-      // 默认都按 string 处理
-      property = ApiProperty(
-        type: 'string',
-        required: false,
+    if (_isListType(typeMirror)) {
+      return _inferListProperty(typeMirror, required: required);
+    }
+
+    if (_isMapType(typeMirror)) {
+      return _inferMapProperty(typeMirror, required: required);
+    }
+
+    if (_isEnumType(typeMirror)) {
+      return ApiProperty(type: 'string', required: required);
+    }
+
+    if (core is ClassMirror) {
+      return _inferClassProperty(core, required: required);
+    }
+
+    if (t == dynamic) {
+      return ApiProperty(type: 'object', required: required);
+    }
+
+    return ApiProperty(type: 'string', required: required);
+  }
+
+  ApiProperty _inferListProperty(
+    TypeMirror typeMirror, {
+    required bool required,
+  }) {
+    final core = _coreTypeMirror(typeMirror);
+    final args = core.typeArguments;
+
+    if (args.isEmpty) {
+      return ApiProperty(
+        type: 'array',
+        required: required,
+        items: const ApiProperty(type: 'string'),
       );
     }
-    
-    // 缓存结果
-    _typePropertyCache[t] = property;
-    return property;
+
+    final itemType = args.first.reflectedType;
+    if (itemType == null || itemType == dynamic) {
+      return ApiProperty(
+        type: 'array',
+        required: required,
+        items: const ApiProperty(type: 'object'),
+      );
+    }
+
+    return ApiProperty(
+      type: 'array',
+      required: required,
+      items: _inferPropertyFromType('item', reflectType(itemType)),
+    );
+  }
+
+  ApiProperty _inferMapProperty(
+    TypeMirror typeMirror, {
+    required bool required,
+  }) {
+    final core = _coreTypeMirror(typeMirror);
+    final args = core.typeArguments;
+    ApiProperty? valueSchema;
+    if (args.length >= 2) {
+      final valueType = args[1].reflectedType;
+      if (valueType != null && valueType != dynamic) {
+        valueSchema = _inferPropertyFromType('value', reflectType(valueType));
+      }
+    }
+
+    return ApiProperty(
+      type: 'object',
+      required: required,
+      additionalProperties: valueSchema ?? const ApiProperty(type: 'string'),
+    );
+  }
+
+  ApiProperty _inferClassProperty(
+    ClassMirror classMirror, {
+    required bool required,
+  }) {
+    if (_processModelAnnotations(classMirror) != null) {
+      _ensureModelRegistered(classMirror);
+      final name = MirrorSystem.getName(classMirror.simpleName);
+      return ApiProperty(
+        ref: _schemaToRef(name),
+        required: required,
+      );
+    }
+
+    final nested = _processModelProperties(classMirror, const ApiModel());
+    if (nested.isNotEmpty) {
+      return ApiProperty(
+        type: 'object',
+        required: required,
+        properties: nested,
+      );
+    }
+
+    return ApiProperty(type: 'object', required: required);
+  }
+
+  static void _initPrimitiveCache() {
+    if (_primitiveTypeCache.isNotEmpty) {
+      return;
+    }
+    _primitiveTypeCache[int] = const ApiProperty(type: 'integer', format: 'int64');
+    _primitiveTypeCache[double] =
+        const ApiProperty(type: 'number', format: 'double');
+    _primitiveTypeCache[bool] = const ApiProperty(type: 'boolean');
+    _primitiveTypeCache[String] = const ApiProperty(type: 'string');
+    _primitiveTypeCache[DateTime] =
+        const ApiProperty(type: 'string', format: 'date-time');
   }
 
   /// 将 `ApiProperty` 转成 OpenAPI Schema 对象。
-  ///
-  /// 支持：
-  /// - `properties` 嵌套（递归）
-  /// - `$ref` 引用
   Map<String, dynamic> _buildPropertySchema(ApiProperty property) {
+    final ref = _resolveRef(property);
+    if (ref != null) {
+      return {
+        '\$ref': ref,
+        if (property.description != null) 'description': property.description,
+        if (property.example != null) 'example': property.example,
+      };
+    }
+
+    if (property.type == 'array') {
+      return {
+        'type': 'array',
+        if (property.description != null) 'description': property.description,
+        if (property.example != null) 'example': property.example,
+        if (property.items != null)
+          'items': _buildPropertySchema(property.items!),
+      };
+    }
+
     final schema = <String, dynamic>{};
+    if (property.type != null) {
+      schema['type'] = property.type;
+    }
 
-    schema['type'] = property.type;
-
-    if (property.description != null) schema['description'] = property.description;
+    if (property.description != null) {
+      schema['description'] = property.description;
+    }
     if (property.format != null) schema['format'] = property.format;
     if (property.enumValues != null) schema['enum'] = property.enumValues;
     if (property.example != null) schema['example'] = property.example;
 
-    // 嵌套对象 properties
-    if (property.properties != null) {
-      final properties = <String, dynamic>{};
-      for (final entry in property.properties!.entries) {
-        properties[entry.key] = _buildPropertySchema(entry.value);
-      }
-      schema['properties'] = properties;
+    if (property.additionalProperties != null) {
+      schema['additionalProperties'] =
+          _buildPropertySchema(property.additionalProperties!);
     }
 
-    // 新增：支持 $ref 引用（例如 '#/components/schemas/Foo'）
-    if (property.ref != null) schema['\$ref'] = property.ref!;
+    if (property.properties != null) {
+      final properties = <String, dynamic>{};
+      final requiredFields = <String>[];
+      for (final entry in property.properties!.entries) {
+        properties[entry.key] = _buildPropertySchema(entry.value);
+        if (entry.value.required == true) {
+          requiredFields.add(entry.key);
+        }
+      }
+      schema['properties'] = properties;
+      if (requiredFields.isNotEmpty) {
+        schema['required'] = requiredFields;
+      }
+    }
 
     return schema;
   }
@@ -286,7 +507,7 @@ class OpenApiRegistry {
               // 将 data 字段替换为具体的泛型类型
               properties[key] = _buildPropertySchema(
                 ApiProperty(
-                  type: value.type,
+                  type: value.type ?? 'object',
                   description: value.description,
                   required: value.required,
                   format: value.format,
@@ -309,7 +530,7 @@ class OpenApiRegistry {
           if (baseModel.properties != null)
             'required': [
               for (final entry in baseModel.properties!.entries)
-                if (entry.value.required) entry.key,
+                if (entry.value.required == true) entry.key,
             ],
         };
       }
@@ -431,7 +652,7 @@ class OpenApiRegistry {
         if (model.properties != null)
           'required': [
             for (final entry in model.properties!.entries)
-              if (entry.value.required) entry.key,
+              if (entry.value.required == true) entry.key,
           ],
       };
     });

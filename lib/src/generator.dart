@@ -219,17 +219,13 @@ class OpenApiRegistry {
     if (!_isNullableMirror(mirror)) {
       return mirror;
     }
-    final type = mirror.reflectedType;
-    if (type == null) {
-      return mirror;
-    }
-    return reflectType(type);
+    return reflectType(mirror.reflectedType);
   }
 
   bool _isListType(TypeMirror mirror) {
     final core = _coreTypeMirror(mirror);
     final t = core.reflectedType;
-    if (t == null || t == dynamic) {
+    if (t == dynamic) {
       return false;
     }
     return t == List || MirrorSystem.getName(core.simpleName) == 'List';
@@ -238,7 +234,7 @@ class OpenApiRegistry {
   bool _isMapType(TypeMirror mirror) {
     final core = _coreTypeMirror(mirror);
     final t = core.reflectedType;
-    if (t == null || t == dynamic) {
+    if (t == dynamic) {
       return false;
     }
     return t == Map || MirrorSystem.getName(core.simpleName) == 'Map';
@@ -307,7 +303,7 @@ class OpenApiRegistry {
     final core = _coreTypeMirror(typeMirror);
     final t = core.reflectedType;
 
-    if (t != null && _primitiveTypeCache.containsKey(t)) {
+    if (_primitiveTypeCache.containsKey(t)) {
       final cached = _primitiveTypeCache[t]!;
       return ApiProperty(
         type: cached.type,
@@ -355,7 +351,7 @@ class OpenApiRegistry {
     }
 
     final itemType = args.first.reflectedType;
-    if (itemType == null || itemType == dynamic) {
+    if (itemType == dynamic) {
       return ApiProperty(
         type: 'array',
         required: required,
@@ -379,7 +375,7 @@ class OpenApiRegistry {
     ApiProperty? valueSchema;
     if (args.length >= 2) {
       final valueType = args[1].reflectedType;
-      if (valueType != null && valueType != dynamic) {
+      if (valueType != dynamic) {
         valueSchema = _inferPropertyFromType('value', reflectType(valueType));
       }
     }
@@ -486,7 +482,7 @@ class OpenApiRegistry {
   }
 
   
-  /// 解析 schema 引用，支持泛型语法如 BaseResponse<HealthData>
+  /// 解析 schema 引用，支持泛型语法如 `BaseResponse<HealthData>`
   Map<String, dynamic> _parseSchemaRef(String schemaRef) {
     // 检查是否包含泛型语法
     final genericMatch = _genericRegex.firstMatch(schemaRef);

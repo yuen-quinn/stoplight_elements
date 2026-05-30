@@ -1,5 +1,7 @@
 # stoplight_elements
 
+[English](README_EN.md)
+
 基于 Dart 注解的 OpenAPI 3.0.3 文档生成库，内置 [Stoplight Elements](https://github.com/stoplightio/elements) 交互式文档页面渲染。
 
 用 `@ApiPath`、`@ApiModel` 等注解描述接口与数据模型，运行时自动扫描并生成 OpenAPI JSON，再通过 `buildStoplightElementsHtml()` 输出可浏览的 API 文档页。

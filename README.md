@@ -8,13 +8,15 @@ Describe endpoints and data models with annotations such as `@ApiPath` and `@Api
 
 ## Features
 
-- Annotation-driven: paths, parameters, request bodies, responses, tags, and security schemes
-- Runtime auto-scan: `OpenApiRegistry.instance.autoScan()` discovers annotations via `dart:mirrors`
-- OpenAPI 3.0.3 output: `buildOpenApi()` generates a complete spec
-- Type inference: omit `type` on field-level `@ApiProperty`; Dart types are inferred automatically
-- Nested types: `User`, `List<User>`, `Map<String, User>`, etc. map to `$ref` / `array` / `additionalProperties`
-- Generic responses: `BaseResponse<HealthData>` syntax expands schemas
-- Stoplight Elements HTML: generate a docs page in one call
+- **Annotation-driven**: paths, parameters, request bodies, responses, tags, and security schemes
+- **Runtime auto-scan**: `OpenApiRegistry.instance.autoScan()` discovers annotations via `dart:mirrors`
+- **OpenAPI 3.0.3 output**: `buildOpenApi()` generates a complete spec
+- **Type inference**: omit `type` on field-level `@ApiProperty`; Dart types are inferred automatically
+- **Nested types**: `User`, `List<User>`, `Map<String, User>`, etc. map to `$ref` / `array` / `additionalProperties`
+- **Nested generics**: fully supports `Result<PaginatedResult<Package>>` and arbitrary nesting depth
+- **Generic model expansion**: mark fields with `isGeneric: true` to replace them with the concrete type argument
+- **Third-party type bridging**: create standalone `@ApiModel` classes for external generic types (e.g., ORM pagination results)
+- **Stoplight Elements HTML**: generate a docs page in one call
 
 ## Requirements
 
@@ -27,7 +29,7 @@ Add to your `pubspec.yaml`:
 
 ```yaml
 dependencies:
-  stoplight_elements: ^0.0.6
+  stoplight_elements: ^0.0.7
 ```
 
 Then run:
@@ -104,7 +106,7 @@ class HealthData {
   properties: {
     'code': ApiProperty(type: 'integer', description: 'Business code', example: 0),
     'message': ApiProperty(type: 'string', description: 'Message'),
-    'data': ApiProperty(type: 'object', description: 'Payload'),
+    'data': ApiProperty(type: 'object', description: 'Payload', isGeneric: true),
   },
 )
 class BaseResponse {}
@@ -170,61 +172,27 @@ Recommended HTTP routes:
 | `GET /openapi.json` | Returns OpenAPI JSON |
 | `GET /docs` | Returns the Stoplight Elements docs page |
 
-**Vania framework example:**
+**Serinus framework example:**
 
 ```dart
-import 'package:vania/http/controller.dart';
-import 'package:vania/http/response.dart';
+import 'package:serinus/serinus.dart';
 import 'package:stoplight_elements/stoplight_elements.dart';
 
 class OpenApiController extends Controller {
-  Future<Response> spec() async {
-    try {
-      final spec = OpenApiRegistry.instance.buildOpenApi();
-      return Response.json(spec);
-    } catch (e, st) {
-      return Response.json({
-        'error': 'Failed to generate OpenAPI spec',
-        'message': e.toString(),
-        'stackTrace': st.toString(),
-      });
-    }
+  OpenApiController() : super('/');
+
+  Future<Response> spec(RequestContext ctx) async {
+    final spec = OpenApiRegistry.instance.buildOpenApi();
+    return Response.json(spec);
   }
 
-  Future<Response> docs() async {
+  Future<Response> docs(RequestContext ctx) async {
     final html = buildStoplightElementsHtml(
       openapiUrl: '/openapi.json',
       title: 'My API Documentation',
     );
     return Response.html(html);
   }
-}
-```
-
-**Plain Dart `shelf` example:**
-
-```dart
-import 'dart:convert';
-
-import 'package:shelf/shelf.dart';
-import 'package:stoplight_elements/stoplight_elements.dart';
-
-Handler createHandler() {
-  return (Request request) {
-    if (request.url.path == 'openapi.json') {
-      return Response.ok(
-        jsonEncode(OpenApiRegistry.instance.buildOpenApi()),
-        headers: {'content-type': 'application/json'},
-      );
-    }
-    if (request.url.path == 'docs') {
-      return Response.ok(
-        buildStoplightElementsHtml(openapiUrl: '/openapi.json'),
-        headers: {'content-type': 'text/html; charset=utf-8'},
-      );
-    }
-    return Response.notFound('Not Found');
-  };
 }
 ```
 
@@ -324,6 +292,7 @@ class User { ... }
   items: ApiProperty(...),     // array item schema
   additionalProperties: ApiProperty(...), // Map value schema
   properties: { ... },         // inline object sub-fields
+  isGeneric: false,            // mark as generic carrier field (see "Nested Generics")
 )
 ```
 
@@ -409,25 +378,96 @@ class UserMap {
 
 ---
 
-## Generic Responses
+## Nested Generics
 
-Response schemas support `BaseSchema<ConcreteType>` syntax. The generator replaces the `data` field in the base model with a `$ref` to the concrete type:
+stoplight_elements supports **arbitrary nesting depth** for generic types. This is achieved through the `isGeneric` flag on `ApiProperty`.
+
+### How it works
+
+When a schema reference contains generic syntax (e.g., `Result<Package>`), the generator:
+
+1. Parses the base type name and generic argument(s)
+2. `List<X>` always outputs `{ "type": "array", "items": ... }`
+3. For other types: looks up the base model in registered schemas
+4. If found, expands all properties, replacing fields marked `isGeneric: true` with the concrete type argument
+5. If not found, "penetrates" through to the inner type (e.g., `UnknownWrapper<User>` → `User`)
+
+### Example: Result<T> wrapper
 
 ```dart
 @ApiModel(
+  description: '通用接口响应包装',
   properties: {
-    'code': ApiProperty(type: 'integer'),
-    'message': ApiProperty(type: 'string'),
-    'data': ApiProperty(type: 'object'),
+    'code': ApiProperty(type: 'integer', description: '状态码', required: true),
+    'message': ApiProperty(type: 'string', description: '响应消息', required: true),
+    'data': ApiProperty(
+      type: 'object',
+      description: '响应数据',
+      isGeneric: true,  // ← marks this field as the generic carrier
+    ),
   },
 )
-class BaseResponse {}
-
-// Use in @ApiPath responses:
-schema: 'BaseResponse<HealthData>'
+class Result {}
 ```
 
-This expands `BaseResponse` and points its `data` field to `#/components/schemas/HealthData`.
+Usage in endpoints:
+
+```dart
+// Simple generic
+schema: 'Result<Package>'
+
+// Nested generics — fully supported
+schema: 'Result<List<PackageVersion>>'
+schema: 'Result<PaginatedResult<Package>>'
+```
+
+### Expansion chain for `Result<PaginatedResult<Package>>`
+
+```
+Result
+├── code    → { "type": "integer" }              // unchanged
+├── message → { "type": "string" }               // unchanged
+└── data    → PaginatedResult<Package>           // isGeneric → recurse
+              ├── items   → Package              // isGeneric → recurse
+              ├── total   → { "type": "integer" }
+              ├── page    → { "type": "integer" }
+              ├── pageSize → { "type": "integer" }
+              └── pageCount → { "type": "integer" }
+```
+
+### Multiple generic carriers
+
+A single model can have multiple `isGeneric: true` fields. All of them will be replaced with the same generic argument:
+
+```dart
+@ApiModel(properties: {
+  'current': ApiProperty(isGeneric: true),  // both replaced
+  'next': ApiProperty(isGeneric: true),     // with the same type
+})
+class DualWrapper {}
+```
+
+### Bridging third-party generic types
+
+For generic types from external packages (e.g., ORM pagination results) that you cannot modify, create a standalone `@ApiModel` class in your project:
+
+```dart
+// file: lib/shared/api_doc_models.dart
+
+@ApiModel(
+  description: '分页查询结果',
+  properties: {
+    'items': ApiProperty(type: 'array', description: '数据列表', isGeneric: true, required: true),
+    'total': ApiProperty(type: 'integer', description: '总记录数', required: true),
+    'page': ApiProperty(type: 'integer', description: '当前页码', required: true),
+    'pageSize': ApiProperty(type: 'integer', description: '每页大小', required: true),
+    'pageCount': ApiProperty(type: 'integer', description: '总页数', required: true),
+  },
+)
+class PaginatedResult {}
+```
+
+Ensure this file is imported somewhere reachable by `autoScan` (e.g., via your app's barrel export file), so the scanner discovers the `@ApiModel` annotation.
 
 ---
 
@@ -519,7 +559,7 @@ buildStoplightElementsHtml(
 
 ---
 
-## Full Integration Example (Vania)
+## Full Integration Example (Serinus)
 
 ```dart
 // ── models/health.dart ──
@@ -536,9 +576,31 @@ class HealthData {
   Map<String, dynamic> toJson() => {'status': status, 'service': service};
 }
 
+// ── shared/result.dart ──
+@ApiModel(
+  description: '通用接口响应包装',
+  properties: {
+    'code': ApiProperty(type: 'integer', description: '状态码', required: true),
+    'message': ApiProperty(type: 'string', description: '消息', required: true),
+    'data': ApiProperty(type: 'object', description: '数据', isGeneric: true),
+  },
+)
+class Result {
+  final int code;
+  final String message;
+  final Object? data;
+  Result({required this.code, required this.message, this.data});
+  factory Result.ok({String message = 'OK', Object? data}) =>
+      Result(code: 200, message: message, data: data);
+}
+
 // ── controllers/health_controller.dart ──
 @ApiTag(name: 'Health', description: 'Health checks')
 class HealthController extends Controller {
+  HealthController() : super('/health') {
+    on(Route.get('/'), health);
+  }
+
   @ApiPath(
     path: '/health',
     method: 'GET',
@@ -548,43 +610,28 @@ class HealthController extends Controller {
       200: ApiResponse(
         code: 200,
         description: 'OK',
-        schema: 'HealthData',
+        schema: 'Result<HealthData>',
       ),
     },
   )
-  Future<Response> health() async {
-    return Response.json(
-      HealthData(status: 'ok', service: 'my_api').toJson(),
-    );
+  Future<Result> health(RequestContext ctx) async {
+    return Result.ok(data: HealthData(status: 'ok', service: 'my_api'));
   }
 }
 
-// ── providers/route_service_provider.dart ──
-class RouteServiceProvider extends ServiceProvider {
-  @override
-  Future<void> register() async {
-    OpenApiConfig.configure(
-      title: 'My API',
-      version: '1.0.0',
-      serverUrl: 'http://localhost:8000/api/v1/',
-    );
+// ── bootstrap.dart ──
+Future<void> bootstrap() async {
+  OpenApiConfig.configure(
+    title: 'My API',
+    version: '1.0.0',
+    serverUrl: 'http://localhost:8000/api/v1/',
+  );
 
-    OpenApiRegistry.instance.registerSecurityScheme(
-      'authorization',
-      ApiSecurityScheme(
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'JWT Bearer',
-      ),
-    );
+  OpenApiRegistry.instance.autoScan(
+    libraryFilter: (uri) => uri.toString().startsWith('package:my_app/'),
+  );
 
-    OpenApiRegistry.instance.autoScan(
-      libraryFilter: (uri) => uri.toString().startsWith('package:my_app/'),
-    );
-
-    // Register business routes and OpenAPI routes...
-  }
+  // Start your server and register OpenAPI routes...
 }
 ```
 

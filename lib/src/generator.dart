@@ -15,9 +15,9 @@ class OpenApiRegistry {
 
   static final Map<Type, ApiProperty> _primitiveTypeCache = {};
   static bool _isScanned = false;
-  
+
   // 预编译正则表达式
-  static final RegExp _genericRegex = RegExp(r'^(\w+)<(\w+)>$');
+  static final RegExp _genericRegex = RegExp(r'^(\w+)<(.+)>$');
 
   void registerPath(ApiPath path) {
     _paths.add(path);
@@ -57,7 +57,7 @@ class OpenApiRegistry {
   /// 使用前建议在生产环境慎用或加上 URI 过滤。
   void autoScan({bool Function(Uri uri)? libraryFilter}) {
     if (_isScanned) return;
-    
+
     final system = currentMirrorSystem();
 
     for (final lib in system.libraries.values) {
@@ -118,7 +118,7 @@ class OpenApiRegistry {
         }
       }
     }
-    
+
     _isScanned = true;
   }
 
@@ -259,7 +259,7 @@ class OpenApiRegistry {
   /// 扫描带有 @ApiModel 注解的模型类，通过类名构建 schema
   void scanModelByName(String name, ClassMirror classMirror) {
     final apiModelMeta = _processModelAnnotations(classMirror);
-    
+
     // 没有 @ApiModel 就不处理
     if (apiModelMeta == null) {
       return;
@@ -394,10 +394,7 @@ class OpenApiRegistry {
     if (_processModelAnnotations(classMirror) != null) {
       _ensureModelRegistered(classMirror);
       final name = MirrorSystem.getName(classMirror.simpleName);
-      return ApiProperty(
-        ref: _schemaToRef(name),
-        required: required,
-      );
+      return ApiProperty(ref: _schemaToRef(name), required: required);
     }
 
     final nested = _processModelProperties(classMirror, const ApiModel());
@@ -416,13 +413,20 @@ class OpenApiRegistry {
     if (_primitiveTypeCache.isNotEmpty) {
       return;
     }
-    _primitiveTypeCache[int] = const ApiProperty(type: 'integer', format: 'int64');
-    _primitiveTypeCache[double] =
-        const ApiProperty(type: 'number', format: 'double');
+    _primitiveTypeCache[int] = const ApiProperty(
+      type: 'integer',
+      format: 'int64',
+    );
+    _primitiveTypeCache[double] = const ApiProperty(
+      type: 'number',
+      format: 'double',
+    );
     _primitiveTypeCache[bool] = const ApiProperty(type: 'boolean');
     _primitiveTypeCache[String] = const ApiProperty(type: 'string');
-    _primitiveTypeCache[DateTime] =
-        const ApiProperty(type: 'string', format: 'date-time');
+    _primitiveTypeCache[DateTime] = const ApiProperty(
+      type: 'string',
+      format: 'date-time',
+    );
   }
 
   /// 将 `ApiProperty` 转成 OpenAPI Schema 对象。
@@ -459,8 +463,9 @@ class OpenApiRegistry {
     if (property.example != null) schema['example'] = property.example;
 
     if (property.additionalProperties != null) {
-      schema['additionalProperties'] =
-          _buildPropertySchema(property.additionalProperties!);
+      schema['additionalProperties'] = _buildPropertySchema(
+        property.additionalProperties!,
+      );
     }
 
     if (property.properties != null) {
@@ -481,58 +486,53 @@ class OpenApiRegistry {
     return schema;
   }
 
-  
-  /// 解析 schema 引用，支持泛型语法如 `BaseResponse<HealthData>`
+  /// 解析 schema 引用，支持泛型语法如 `Result<List<PackageVersion>>`
   Map<String, dynamic> _parseSchemaRef(String schemaRef) {
     // 检查是否包含泛型语法
     final genericMatch = _genericRegex.firstMatch(schemaRef);
-    
+
     if (genericMatch != null) {
       final baseSchema = genericMatch.group(1)!;
       final genericType = genericMatch.group(2)!;
-      
-      // 获取基础模型的定义
+
+      // List<X> 特殊处理：输出 array schema
+      if (baseSchema == 'List') {
+        return {'type': 'array', 'items': _parseSchemaRef(genericType)};
+      }
+
+      // 检查基础模型是否在 _schemas 中（有 @ApiModel 注解）
       final baseModel = _schemas[baseSchema];
-      if (baseModel != null) {
+      if (baseModel != null && baseModel.properties != null) {
+        // 展开基础模型的属性，但将 isGeneric 字段替换为泛型类型
         final properties = <String, dynamic>{};
-        
-        // 复制基础模型的属性
-        if (baseModel.properties != null) {
-          baseModel.properties!.forEach((key, value) {
-            if (key == 'data') {
-              // 将 data 字段替换为具体的泛型类型
-              properties[key] = _buildPropertySchema(
-                ApiProperty(
-                  type: value.type ?? 'object',
-                  description: value.description,
-                  required: value.required,
-                  format: value.format,
-                  example: value.example,
-                  enumValues: value.enumValues,
-                  properties: value.properties,
-                  ref: '#/components/schemas/$genericType',
-                ),
-              );
-            } else {
-              properties[key] = _buildPropertySchema(value);
-            }
-          });
+        final requiredFields = <String>[];
+
+        for (final entry in baseModel.properties!.entries) {
+          if (entry.value.isGeneric) {
+            // 泛型承载字段：用泛型参数的类型替换
+            properties[entry.key] = _parseSchemaRef(genericType);
+          } else {
+            properties[entry.key] = _buildPropertySchema(entry.value);
+          }
+          if (entry.value.required == true) {
+            requiredFields.add(entry.key);
+          }
         }
-        
+
         return {
           'type': 'object',
-          if (baseModel.description != null) 'description': baseModel.description,
+          if (baseModel.description != null)
+            'description': baseModel.description,
           'properties': properties,
-          if (baseModel.properties != null)
-            'required': [
-              for (final entry in baseModel.properties!.entries)
-                if (entry.value.required == true) entry.key,
-            ],
+          if (requiredFields.isNotEmpty) 'required': requiredFields,
         };
       }
+
+      // 基础模型未注册或无属性：穿透到内部类型
+      return _parseSchemaRef(genericType);
     }
-    
-    // 如果不是泛型或找不到基础模型，使用普通的 ref
+
+    // 如果不是泛型，使用普通的 $ref
     return {'\$ref': '#/components/schemas/$schemaRef'};
   }
 
@@ -558,18 +558,20 @@ class OpenApiRegistry {
             // 如果没有显式 tags，则默认用类上的 ApiTag 名称
             if ((obj.tags == null || obj.tags!.isEmpty) && _tags.isNotEmpty) {
               final firstTag = _tags.keys.first;
-              registerPath(ApiPath(
-                path: obj.path,
-                method: obj.method,
-                summary: obj.summary,
-                description: obj.description,
-                tags: [firstTag],
-                deprecated: obj.deprecated,
-                parameters: obj.parameters,
-                responses: obj.responses,
-                security: obj.security,
-                requestBody: obj.requestBody,
-              ));
+              registerPath(
+                ApiPath(
+                  path: obj.path,
+                  method: obj.method,
+                  summary: obj.summary,
+                  description: obj.description,
+                  tags: [firstTag],
+                  deprecated: obj.deprecated,
+                  parameters: obj.parameters,
+                  responses: obj.responses,
+                  security: obj.security,
+                  requestBody: obj.requestBody,
+                ),
+              );
             } else {
               registerPath(obj);
             }
@@ -590,17 +592,22 @@ class OpenApiRegistry {
         if (p.tags != null) 'tags': p.tags,
         'deprecated': p.deprecated,
         if (p.parameters != null)
-          'parameters': p.parameters!.map((param) => <String, dynamic>{
-            'name': param.name,
-            'in': param.location,
-            if (param.description != null) 'description': param.description,
-            'required': param.required,
-            'schema': <String, dynamic>{
-              'type': param.type,
-              if (param.format != null) 'format': param.format,
-            },
-            if (param.example != null) 'example': param.example,
-          }).toList(),
+          'parameters': p.parameters!
+              .map(
+                (param) => <String, dynamic>{
+                  'name': param.name,
+                  'in': param.location,
+                  if (param.description != null)
+                    'description': param.description,
+                  'required': param.required,
+                  'schema': <String, dynamic>{
+                    'type': param.type,
+                    if (param.format != null) 'format': param.format,
+                  },
+                  if (param.example != null) 'example': param.example,
+                },
+              )
+              .toList(),
         if (p.requestBody != null)
           'requestBody': <String, dynamic>{
             'description': p.requestBody!.description,
@@ -630,7 +637,7 @@ class OpenApiRegistry {
         },
         if (p.security != null)
           'security': [
-            for (final s in p.security!) <String, List<String>>{s: []}
+            for (final s in p.security!) <String, List<String>>{s: []},
           ],
       };
     }
@@ -658,8 +665,7 @@ class OpenApiRegistry {
       componentsSecurity[name] = {
         'type': scheme.type,
         'scheme': scheme.scheme,
-        if (scheme.bearerFormat != null)
-          'bearerFormat': scheme.bearerFormat,
+        if (scheme.bearerFormat != null) 'bearerFormat': scheme.bearerFormat,
         if (scheme.description != null) 'description': scheme.description,
         if (scheme.name != null) 'name': scheme.name,
         if (scheme.in_ != null) 'in': scheme.in_,
@@ -671,7 +677,7 @@ class OpenApiRegistry {
         {
           'name': t.name,
           if (t.description != null) 'description': t.description,
-        }
+        },
     ];
 
     return {
@@ -688,4 +694,3 @@ class OpenApiRegistry {
     };
   }
 }
-

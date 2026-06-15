@@ -137,6 +137,12 @@ class ApiProperty {
   /// `Map` 值类型 schema（输出为 `additionalProperties`）
   final ApiProperty? additionalProperties;
 
+  /// 标记该属性为泛型承载字段。当泛型模型（如 `Result<Package>`）被解析时，
+  /// 此字段的 schema 会被替换为泛型参数的类型，而非使用原始定义。
+  /// 例如 `Result<Package>` 中标记了 `isGeneric: true` 的 `data` 字段
+  /// 会被解析为 `Package` 的 schema。
+  final bool isGeneric;
+
   const ApiProperty({
     this.type,
     this.description,
@@ -149,6 +155,7 @@ class ApiProperty {
     this.schema,
     this.items,
     this.additionalProperties,
+    this.isGeneric = false,
   });
 }
 

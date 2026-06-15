@@ -8,13 +8,15 @@
 
 ## 特性
 
-- 注解驱动：路径、参数、请求体、响应、标签、安全方案均可声明
-- 运行时自动扫描：`OpenApiRegistry.instance.autoScan()` 基于 `dart:mirrors` 发现注解
-- OpenAPI 3.0.3 规范输出：`buildOpenApi()` 生成完整 spec
-- 类型推断：字段上的 `@ApiProperty` 可省略 `type`，由 Dart 类型自动推断
-- 嵌套类型：`User`、`List<User>`、`Map<String, User>` 等自动映射为 `$ref` / `array` / `additionalProperties`
-- 泛型响应：支持 `BaseResponse<HealthData>` 语法展开 schema
-- Stoplight Elements HTML：一行代码生成文档页
+- **注解驱动**：路径、参数、请求体、响应、标签、安全方案均可声明
+- **运行时自动扫描**：`OpenApiRegistry.instance.autoScan()` 基于 `dart:mirrors` 发现注解
+- **OpenAPI 3.0.3 规范输出**：`buildOpenApi()` 生成完整 spec
+- **类型推断**：字段上的 `@ApiProperty` 可省略 `type`，由 Dart 类型自动推断
+- **嵌套类型**：`User`、`List<User>`、`Map<String, User>` 等自动映射为 `$ref` / `array` / `additionalProperties`
+- **嵌套泛型**：完整支持 `Result<PaginatedResult<Package>>` 等任意嵌套深度
+- **泛型模型展开**：通过 `isGeneric: true` 标记字段，替换为具体类型参数
+- **第三方类型桥接**：为外部泛型类型（如 ORM 分页结果）创建独立的 `@ApiModel` 类
+- **Stoplight Elements HTML**：一行代码生成文档页
 
 ## 环境要求
 
@@ -27,7 +29,7 @@
 
 ```yaml
 dependencies:
-  stoplight_elements: ^0.0.6
+  stoplight_elements: ^0.0.7
 ```
 
 然后执行：
@@ -104,7 +106,7 @@ class HealthData {
   properties: {
     'code': ApiProperty(type: 'integer', description: '业务码', example: 0),
     'message': ApiProperty(type: 'string', description: '提示信息'),
-    'data': ApiProperty(type: 'object', description: '业务数据'),
+    'data': ApiProperty(type: 'object', description: '业务数据', isGeneric: true),
   },
 )
 class BaseResponse {}
@@ -170,60 +172,27 @@ OpenApiRegistry.instance.autoScan(
 | `GET /openapi.json` | 返回 OpenAPI JSON |
 | `GET /docs` | 返回 Stoplight Elements 文档页 |
 
-**Vania 框架示例：**
+**Serinus 框架示例：**
 
 ```dart
-import 'package:vania/http/controller.dart';
-import 'package:vania/http/response.dart';
+import 'package:serinus/serinus.dart';
 import 'package:stoplight_elements/stoplight_elements.dart';
 
 class OpenApiController extends Controller {
-  Future<Response> spec() async {
-    try {
-      final spec = OpenApiRegistry.instance.buildOpenApi();
-      return Response.json(spec);
-    } catch (e, st) {
-      return Response.json({
-        'error': 'Failed to generate OpenAPI spec',
-        'message': e.toString(),
-        'stackTrace': st.toString(),
-      });
-    }
+  OpenApiController() : super('/');
+
+  Future<Response> spec(RequestContext ctx) async {
+    final spec = OpenApiRegistry.instance.buildOpenApi();
+    return Response.json(spec);
   }
 
-  Future<Response> docs() async {
+  Future<Response> docs(RequestContext ctx) async {
     final html = buildStoplightElementsHtml(
       openapiUrl: '/openapi.json',
       title: 'My API Documentation',
     );
     return Response.html(html);
   }
-}
-```
-
-**纯 Dart `shelf` 示例：**
-
-```dart
-import 'package:shelf/shelf.dart';
-import 'package:shelf/shelf_io.dart' as io;
-import 'package:stoplight_elements/stoplight_elements.dart';
-
-Handler createHandler() {
-  return (Request request) {
-    if (request.url.path == 'openapi.json') {
-      return Response.ok(
-        jsonEncode(OpenApiRegistry.instance.buildOpenApi()),
-        headers: {'content-type': 'application/json'},
-      );
-    }
-    if (request.url.path == 'docs') {
-      return Response.ok(
-        buildStoplightElementsHtml(openapiUrl: '/openapi.json'),
-        headers: {'content-type': 'text/html; charset=utf-8'},
-      );
-    }
-    return Response.notFound('Not Found');
-  };
 }
 ```
 
@@ -323,6 +292,7 @@ class User { ... }
   items: ApiProperty(...),     // array 元素 schema
   additionalProperties: ApiProperty(...), // Map 值类型 schema
   properties: { ... },         // 内联 object 子字段
+  isGeneric: false,            // 标记为泛型承载字段（参见「嵌套泛型」章节）
 )
 ```
 
@@ -408,25 +378,96 @@ class UserMap {
 
 ---
 
-## 泛型响应
+## 嵌套泛型
 
-响应 schema 支持 `BaseSchema<ConcreteType>` 语法。生成器会将基础模型中名为 `data` 的字段替换为具体类型的 `$ref`：
+stoplight_elements 支持**任意嵌套深度**的泛型类型，通过 `ApiProperty` 上的 `isGeneric` 标志实现。
+
+### 工作原理
+
+当 schema 引用包含泛型语法（如 `Result<Package>`）时，生成器会：
+
+1. 解析基础类型名称和泛型参数
+2. `List<X>` 始终输出 `{ "type": "array", "items": ... }`
+3. 对于其他类型：在已注册的 schema 中查找基础模型
+4. 若找到，展开所有属性，将标记了 `isGeneric: true` 的字段替换为具体类型参数
+5. 若未找到，则「穿透」到内部类型（如 `UnknownWrapper<User>` → `User`）
+
+### 示例：Result<T> 包装类
 
 ```dart
 @ApiModel(
+  description: '通用接口响应包装',
   properties: {
-    'code': ApiProperty(type: 'integer'),
-    'message': ApiProperty(type: 'string'),
-    'data': ApiProperty(type: 'object'),
+    'code': ApiProperty(type: 'integer', description: '状态码', required: true),
+    'message': ApiProperty(type: 'string', description: '响应消息', required: true),
+    'data': ApiProperty(
+      type: 'object',
+      description: '响应数据',
+      isGeneric: true,  // ← 标记此字段为泛型承载字段
+    ),
   },
 )
-class BaseResponse {}
-
-// 在 @ApiPath 的 responses 中使用：
-schema: 'BaseResponse<HealthData>'
+class Result {}
 ```
 
-等价于展开 `BaseResponse`，并将其 `data` 字段指向 `#/components/schemas/HealthData`。
+在接口中使用：
+
+```dart
+// 简单泛型
+schema: 'Result<Package>'
+
+// 嵌套泛型 — 完全支持
+schema: 'Result<List<PackageVersion>>'
+schema: 'Result<PaginatedResult<Package>>'
+```
+
+### Result<PaginatedResult<Package>> 的展开链
+
+```
+Result
+├── code    → { "type": "integer" }              // 保持不变
+├── message → { "type": "string" }               // 保持不变
+└── data    → PaginatedResult<Package>           // isGeneric → 递归展开
+              ├── items   → Package              // isGeneric → 递归展开
+              ├── total   → { "type": "integer" }
+              ├── page    → { "type": "integer" }
+              ├── pageSize → { "type": "integer" }
+              └── pageCount → { "type": "integer" }
+```
+
+### 多个泛型承载字段
+
+单个模型可以有多个 `isGeneric: true` 字段，它们都会被替换为同一个泛型参数：
+
+```dart
+@ApiModel(properties: {
+  'current': ApiProperty(isGeneric: true),  // 两个都会被替换
+  'next': ApiProperty(isGeneric: true),     // 为同一个类型
+})
+class DualWrapper {}
+```
+
+### 桥接第三方泛型类型
+
+对于来自外部包（如 ORM 分页结果）的泛型类型，可以在项目中创建独立的 `@ApiModel` 类：
+
+```dart
+// 文件：lib/shared/api_doc_models.dart
+
+@ApiModel(
+  description: '分页查询结果',
+  properties: {
+    'items': ApiProperty(type: 'array', description: '数据列表', isGeneric: true, required: true),
+    'total': ApiProperty(type: 'integer', description: '总记录数', required: true),
+    'page': ApiProperty(type: 'integer', description: '当前页码', required: true),
+    'pageSize': ApiProperty(type: 'integer', description: '每页大小', required: true),
+    'pageCount': ApiProperty(type: 'integer', description: '总页数', required: true),
+  },
+)
+class PaginatedResult {}
+```
+
+确保该文件被 `autoScan` 可达的路径导入（如通过应用的桶导出文件），以便扫描器能发现 `@ApiModel` 注解。
 
 ---
 
@@ -518,7 +559,7 @@ buildStoplightElementsHtml(
 
 ---
 
-## 完整集成示例（Vania）
+## 完整集成示例（Serinus）
 
 ```dart
 // ── models/health.dart ──
@@ -535,9 +576,31 @@ class HealthData {
   Map<String, dynamic> toJson() => {'status': status, 'service': service};
 }
 
+// ── shared/result.dart ──
+@ApiModel(
+  description: '通用接口响应包装',
+  properties: {
+    'code': ApiProperty(type: 'integer', description: '状态码', required: true),
+    'message': ApiProperty(type: 'string', description: '消息', required: true),
+    'data': ApiProperty(type: 'object', description: '数据', isGeneric: true),
+  },
+)
+class Result {
+  final int code;
+  final String message;
+  final Object? data;
+  Result({required this.code, required this.message, this.data});
+  factory Result.ok({String message = 'OK', Object? data}) =>
+      Result(code: 200, message: message, data: data);
+}
+
 // ── controllers/health_controller.dart ──
 @ApiTag(name: 'Health', description: '健康检查')
 class HealthController extends Controller {
+  HealthController() : super('/health') {
+    on(Route.get('/'), health);
+  }
+
   @ApiPath(
     path: '/health',
     method: 'GET',
@@ -547,43 +610,28 @@ class HealthController extends Controller {
       200: ApiResponse(
         code: 200,
         description: '正常',
-        schema: 'HealthData',
+        schema: 'Result<HealthData>',
       ),
     },
   )
-  Future<Response> health() async {
-    return Response.json(
-      HealthData(status: 'ok', service: 'my_api').toJson(),
-    );
+  Future<Result> health(RequestContext ctx) async {
+    return Result.ok(data: HealthData(status: 'ok', service: 'my_api'));
   }
 }
 
-// ── providers/route_service_provider.dart ──
-class RouteServiceProvider extends ServiceProvider {
-  @override
-  Future<void> register() async {
-    OpenApiConfig.configure(
-      title: 'My API',
-      version: '1.0.0',
-      serverUrl: 'http://localhost:8000/api/v1/',
-    );
+// ── bootstrap.dart ──
+Future<void> bootstrap() async {
+  OpenApiConfig.configure(
+    title: 'My API',
+    version: '1.0.0',
+    serverUrl: 'http://localhost:8000/api/v1/',
+  );
 
-    OpenApiRegistry.instance.registerSecurityScheme(
-      'authorization',
-      ApiSecurityScheme(
-        type: 'http',
-        scheme: 'bearer',
-        bearerFormat: 'JWT',
-        description: 'JWT Bearer',
-      ),
-    );
+  OpenApiRegistry.instance.autoScan(
+    libraryFilter: (uri) => uri.toString().startsWith('package:my_app/'),
+  );
 
-    OpenApiRegistry.instance.autoScan(
-      libraryFilter: (uri) => uri.toString().startsWith('package:my_app/'),
-    );
-
-    // 注册业务路由与 OpenAPI 路由...
-  }
+  // 启动服务器并注册 OpenAPI 路由...
 }
 ```
 

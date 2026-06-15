@@ -1,3 +1,11 @@
+## 0.0.7
+
+- Add `ApiProperty.isGeneric` flag for marking generic carrier fields in `@ApiModel`.
+- Support nested generics with arbitrary depth (e.g. `Result<PaginatedResult<Package>>`).
+- Rewrite `_parseSchemaRef`: expand base model properties, substitute `isGeneric` fields with concrete type arguments.
+- Unknown generic types now "penetrate" through to the inner type.
+- Update documentation with nested generics guide and Serinus integration example.
+
 ## 0.0.6
 
 - Restructure documentation: English `README.md` (pub.dev default), Chinese `README_zh.md`.
